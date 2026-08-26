@@ -1,0 +1,9 @@
+apiVersion: cmp.example.com/v1alpha1
+kind: Stack
+metadata:
+  labels:
+    app.kubernetes.io/name: demo-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: stack-sample
+spec:
+  # TODO(user): Add fields here
