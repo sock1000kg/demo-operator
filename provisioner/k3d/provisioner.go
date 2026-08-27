@@ -14,11 +14,16 @@ func New() *K3dProvisioner {
 }
 
 func (p *K3dProvisioner) CreateCluster(ctx context.Context, name string, nodeCount int) (string, error) {
+	fmt.Printf("Creating k3d cluster %q...\n", name)
+
 	// 1. Create the cluster using k3d
 	cmd := exec.CommandContext(ctx, "k3d", "cluster", "create", name, fmt.Sprintf("--agents=%d", nodeCount))
+
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("failed to create k3d cluster: %w", err)
 	}
+
+	fmt.Printf("k3d cluster %q created. Getting kubeconfig...\n", name)
 
 	// 2. Retrieve the kubeconfig
 	kubeconfigCmd := exec.CommandContext(ctx, "k3d", "kubeconfig", "get", name)
@@ -27,6 +32,8 @@ func (p *K3dProvisioner) CreateCluster(ctx context.Context, name string, nodeCou
 	if err := kubeconfigCmd.Run(); err != nil {
 		return "", fmt.Errorf("failed to get kubeconfig: %w", err)
 	}
+
+	fmt.Printf("Got kubeconfig for %q.\n", name)
 
 	return out.String(), nil
 }
