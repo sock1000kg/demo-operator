@@ -33,7 +33,7 @@ import (
 // WorkspaceReconciler reconciles a Workspace object
 type WorkspaceReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme      *runtime.Scheme
 	Provisioner provisioner.ClusterProvisioner
 }
 
@@ -99,7 +99,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			log.Error(err, "Failed to update Workspace status")
 			return ctrl.Result{}, err
 		}
-		
+
 		log.Info("Successfully provisioned cluster and updated status", "Workspace", workspace.Name)
 	}
 

@@ -20,8 +20,8 @@ import (
 	"context"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -39,7 +39,7 @@ type StackReconciler struct {
 // +kubebuilder:rbac:groups=cmp.example.com,resources=stacks/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=cmp.example.com,resources=stacks/finalizers,verbs=update
 //
-//Additional permissions
+// Additional permissions
 // +kubebuilder:rbac:groups=cmp.example.com,resources=workspaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 
@@ -67,7 +67,7 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if err := r.Get(ctx, workspaceName, &workspace); err != nil {
 		// Requeue if workspace isn't found or isn't ready yet
 		log.Info("Workspace not found, requeuing", "workspace", stack.Spec.WorkspaceRef)
-		return ctrl.Result{Requeue: true}, nil 
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	if !workspace.Status.Ready {
@@ -85,10 +85,10 @@ func (r *StackReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	kubeconfig := secret.Data["value"]
 
-	// 4. Connect to Workspace and Deploy 
+	// 4. Connect to Workspace and Deploy
 	// targetClient, _ := createClientFromKubeconfig(kubeconfig)
 	// deployer.Deploy(ctx, targetClient, stack.Spec.AppType)
-		
+
 	_ = kubeconfig // Suppress unused variable error
 
 	log.Info("Successfully reconciled Stack")

@@ -59,7 +59,7 @@ type StackStatus struct {
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
-	Ready bool `json:"ready"`
+	Ready      bool               `json:"ready"`
 }
 
 // +kubebuilder:object:root=true
@@ -67,7 +67,7 @@ type StackStatus struct {
 
 // Stack is the Schema for the stacks API
 type Stack struct {
-  // Kubernetes types for apiVersionm kind, metadata.name, metadata.label,...
+	// Kubernetes types for apiVersionm kind, metadata.name, metadata.label,...
 	metav1.TypeMeta `json:",inline"`
 
 	// metadata is a standard object metadata

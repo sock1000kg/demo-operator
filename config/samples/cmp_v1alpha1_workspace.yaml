@@ -7,3 +7,5 @@ metadata:
   name: workspace-sample
 spec:
   # TODO(user): Add fields here
+  customerID: customer-a
+  nodeCount: 1
