@@ -27,6 +27,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	cmpv1alpha1 "github.com/sock1000kg/demo-operator/api/v1alpha1"
+	"github.com/sock1000kg/demo-operator/provisioner"
 )
 
 // WorkspaceReconciler reconciles a Workspace object
