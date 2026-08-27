@@ -60,6 +60,7 @@ type WorkspaceStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 	// Points to a Secret containing the cluster's kubeconfig
 	KubeConfig string `json:"kubeConfigSecretRef,omitempty"`
+	Ready      bool   `json:"ready"`
 }
 
 // +kubebuilder:object:root=true

@@ -37,6 +37,7 @@ import (
 
 	cmpv1alpha1 "github.com/sock1000kg/demo-operator/api/v1alpha1"
 	"github.com/sock1000kg/demo-operator/internal/controller"
+	k3d "github.com/sock1000kg/demo-operator/provisioner/k3d"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -178,9 +179,12 @@ func main() {
 		os.Exit(1)
 	}
 
+	k3dProvisioner := k3d.New()
+
 	if err := (&controller.WorkspaceReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+		Provisioner: k3dProvisioner,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "workspace")
 		os.Exit(1)
