@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -71,7 +72,7 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		if controllerutil.ContainsFinalizer(&workspace, workspaceFinalizer) {
 			log.Info("Deleting external k3d cluster", "workspace", workspace.Name)
 
-			// EXECUTE YOUR K3D TEARDOWN LOGIC HERE
+			// EXECUTE K3D TEARDOWN
 			err := r.Provisioner.DeleteCluster(ctx, workspace.Name)
 			if err != nil {
 				return ctrl.Result{}, err
@@ -122,13 +123,39 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				Namespace: workspace.Namespace,
 			},
 			StringData: map[string]string{
-				"value": kubeconfig,
+				"kubeconfig": kubeconfig,
 			},
 		}
-		if err := r.Create(ctx, secret); err != nil {
-			log.Error(err, "Failed to create kubeconfig secret")
-			return ctrl.Result{}, err
+
+		// CreateOrUpdate fetches the existing Secret (if any) and passes it to the mutate function.
+		op, err := controllerutil.CreateOrUpdate(ctx, r.Client, secret, func() error {
+			// 1. Set the OwnerReference for automatic cleanup.
+			if err := controllerutil.SetControllerReference(&workspace, secret, r.Scheme); err != nil {
+				return err
+			}
+
+			// 2. Define or update the desired state of the Secret.
+			// If the Secret already exists, this overwrites the old, stale kubeconfig.
+			if secret.Data == nil {
+				log.Info("Kubeconfig Secret has no data", "secret", secret.Name)
+				secret.Data = make(map[string][]byte)
+			} else if _, exists := secret.Data["kubeconfig"]; exists {
+				log.Info("Kubeconfig already exists, updating it", "secret", secret.Name)
+			} else {
+				log.Info("Kubeconfig Secret exists but has no kubeconfig", "secret", secret.Name)
+			}
+			secret.Data["kubeconfig"] = []byte(kubeconfig)
+			secret.Type = corev1.SecretTypeOpaque
+
+			return nil
+		})
+
+		if err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to reconcile kubeconfig secret: %w", err)
 		}
+
+		// Log the operation (created, updated, or unchanged) for debugging
+		log.Info("Reconciled kubeconfig secret", "operation", op)
 
 		// Update Workspace status
 		workspace.Status.Ready = true
