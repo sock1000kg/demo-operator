@@ -24,11 +24,14 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	cmpv1alpha1 "github.com/sock1000kg/demo-operator/api/v1alpha1"
 	"github.com/sock1000kg/demo-operator/provisioner"
 )
+
+const workspaceFinalizer = "workspace.cmp.example.com/finalizer"
 
 // WorkspaceReconciler reconciles a Workspace object
 type WorkspaceReconciler struct {
@@ -60,6 +63,41 @@ func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	var workspace cmpv1alpha1.Workspace
 	if err := r.Get(ctx, req.NamespacedName, &workspace); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	// Check if the object is under deletion
+	isMarkedToBeDeleted := workspace.GetDeletionTimestamp() != nil
+	if isMarkedToBeDeleted {
+		if controllerutil.ContainsFinalizer(&workspace, workspaceFinalizer) {
+			log.Info("Deleting external k3d cluster", "workspace", workspace.Name)
+
+			// EXECUTE YOUR K3D TEARDOWN LOGIC HERE
+			err := r.Provisioner.DeleteCluster(ctx, workspace.Name)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
+
+			// Once cleanup is successful, remove the finalizer from the list
+			controllerutil.RemoveFinalizer(&workspace, workspaceFinalizer)
+
+			// Update the object to strip the finalizer.
+			// Kubernetes will now automatically delete the object from etcd.
+			if err := r.Update(ctx, &workspace); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+
+		// Stop reconciliation because the item is being deleted
+		return ctrl.Result{}, nil
+	}
+
+	// The object is NOT being deleted.
+	// Ensure our finalizer is attached before we provision anything.
+	if !controllerutil.ContainsFinalizer(&workspace, workspaceFinalizer) {
+		controllerutil.AddFinalizer(&workspace, workspaceFinalizer)
+		if err := r.Update(ctx, &workspace); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 
 	// Check if cluster exists

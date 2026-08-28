@@ -17,7 +17,10 @@ func (p *K3dProvisioner) CreateCluster(ctx context.Context, name string, nodeCou
 	fmt.Printf("Creating k3d cluster %q...\n", name)
 
 	// 1. Create the cluster using k3d
-	cmd := exec.CommandContext(ctx, "k3d", "cluster", "create", name, fmt.Sprintf("--agents=%d", nodeCount))
+	cmd := exec.CommandContext(ctx, "k3d", "cluster", "create", name,
+		fmt.Sprintf("--agents=%d", nodeCount),
+		"--kubeconfig-update-default=false",
+	)
 
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("failed to create k3d cluster: %w", err)
