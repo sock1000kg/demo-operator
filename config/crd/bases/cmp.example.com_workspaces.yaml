@@ -123,9 +123,18 @@ spec:
               kubeConfigSecretRef:
                 description: Points to a Secret containing the cluster's kubeconfig
                 type: string
+              phase:
+                enum:
+                - Pending
+                - Provisioning
+                - Ready
+                - Failed
+                - Deleting
+                type: string
               ready:
                 type: boolean
             required:
+            - phase
             - ready
             type: object
         required:

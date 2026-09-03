@@ -22,13 +22,14 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	cmpv1alpha1 "github.com/sock1000kg/demo-operator/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
-	cmpv1alpha1 "github.com/sock1000kg/demo-operator/api/v1alpha1"
 	"github.com/sock1000kg/demo-operator/provisioner"
 )
 
@@ -58,117 +59,136 @@ type WorkspaceReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.24.1/pkg/reconcile
 func (r *WorkspaceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := logf.FromContext(ctx)
+	logger := log.FromContext(ctx)
 
-	// Fetch the Workspace instance
+	// 1. Fetch the Workspace instance
 	var workspace cmpv1alpha1.Workspace
 	if err := r.Get(ctx, req.NamespacedName, &workspace); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// Check if the object is under deletion
-	isMarkedToBeDeleted := workspace.GetDeletionTimestamp() != nil
-	if isMarkedToBeDeleted {
-		if controllerutil.ContainsFinalizer(&workspace, workspaceFinalizer) {
-			log.Info("Deleting external k3d cluster", "workspace", workspace.Name)
-
-			// EXECUTE K3D TEARDOWN
-			err := r.Provisioner.DeleteCluster(ctx, workspace.Name)
-			if err != nil {
-				return ctrl.Result{}, err
-			}
-
-			// Once cleanup is successful, remove the finalizer from the list
-			controllerutil.RemoveFinalizer(&workspace, workspaceFinalizer)
-
-			// Update the object to strip the finalizer.
-			// Kubernetes will now automatically delete the object from etcd.
-			if err := r.Update(ctx, &workspace); err != nil {
-				return ctrl.Result{}, err
-			}
+	// 2. Handle Deletion and Finalizers
+	if !workspace.DeletionTimestamp.IsZero() {
+		if err := r.updateStatus(ctx, &workspace, "Deleting", false); err != nil {
+			return ctrl.Result{}, err
 		}
 
-		// Stop reconciliation because the item is being deleted
-		return ctrl.Result{}, nil
+		return r.handleDeletion(ctx, &workspace)
 	}
 
-	// The object is NOT being deleted.
-	// Ensure our finalizer is attached before we provision anything.
+	// 3. Ensure finalizer
 	if !controllerutil.ContainsFinalizer(&workspace, workspaceFinalizer) {
 		controllerutil.AddFinalizer(&workspace, workspaceFinalizer)
+
 		if err := r.Update(ctx, &workspace); err != nil {
 			return ctrl.Result{}, err
 		}
+
+		// Reconcile again with the updated object.
+		return ctrl.Result{}, nil
 	}
 
+	// 3. Provision the Cluster via the abstract interface
 	// Check if cluster exists
 	exists, err := r.Provisioner.Exists(ctx, workspace.Name)
 	if err != nil {
-		log.Error(err, "Failed to check if cluster exists")
+		logger.Error(err, "Failed to check if cluster exists")
 		return ctrl.Result{}, err
 	}
 
 	if !exists {
-		log.Info("Provisioning new cluster", "Workspace", workspace.Name)
-		kubeconfig, err := r.Provisioner.CreateCluster(ctx, workspace.Name, workspace.Spec.NodeCount)
+		kubeconfigBytes, err := r.Provisioner.CreateCluster(ctx, workspace.Name, workspace.Spec.NodeCount)
 		if err != nil {
-			log.Error(err, "Failed to provision cluster")
+			logger.Error(err, "Failed to provision cluster")
+			if err := r.updateStatus(ctx, &workspace, "Deleting", false); err != nil {
+				return ctrl.Result{}, err
+			}
 			return ctrl.Result{}, err
 		}
 
-		// Store Kubeconfig in a Secret in the Management Cluster
-		secret := &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      workspace.Name + "-kubeconfig",
-				Namespace: workspace.Namespace,
-			},
-			StringData: map[string]string{
-				"kubeconfig": kubeconfig,
-			},
-		}
-
-		// CreateOrUpdate fetches the existing Secret (if any) and passes it to the mutate function.
-		op, err := controllerutil.CreateOrUpdate(ctx, r.Client, secret, func() error {
-			// 1. Set the OwnerReference for automatic cleanup.
-			if err := controllerutil.SetControllerReference(&workspace, secret, r.Scheme); err != nil {
-				return err
-			}
-
-			// 2. Define or update the desired state of the Secret.
-			// If the Secret already exists, this overwrites the old, stale kubeconfig.
-			if secret.Data == nil {
-				log.Info("Kubeconfig Secret has no data", "secret", secret.Name)
-				secret.Data = make(map[string][]byte)
-			} else if _, exists := secret.Data["kubeconfig"]; exists {
-				log.Info("Kubeconfig already exists, updating it", "secret", secret.Name)
-			} else {
-				log.Info("Kubeconfig Secret exists but has no kubeconfig", "secret", secret.Name)
-			}
-			secret.Data["kubeconfig"] = []byte(kubeconfig)
-			secret.Type = corev1.SecretTypeOpaque
-
-			return nil
-		})
-
-		if err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to reconcile kubeconfig secret: %w", err)
-		}
-
-		// Log the operation (created, updated, or unchanged) for debugging
-		log.Info("Reconciled kubeconfig secret", "operation", op)
-
-		// Update Workspace status
-		workspace.Status.Ready = true
-		workspace.Status.KubeConfig = secret.Name
-		if err := r.Status().Update(ctx, &workspace); err != nil {
-			log.Error(err, "Failed to update Workspace status")
+		// 4. Reconcile Child Resources (Secrets, etc.)
+		if err := r.reconcileKubeconfigSecret(ctx, &workspace, []byte(kubeconfigBytes)); err != nil {
+			logger.Error(err, "Failed to reconcile Kubeconfig Secret")
+			// Replaced manual status update with helper
+			_ = r.updateStatus(ctx, &workspace, "Failed", false)
 			return ctrl.Result{}, err
 		}
-
-		log.Info("Successfully provisioned cluster and updated status", "Workspace", workspace.Name)
 	}
 
+	// 5. Update Status to Ready
+	if err := r.updateStatus(ctx, &workspace, "Ready", true); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	logger.Info("Successfully reconciled Workspace")
 	return ctrl.Result{}, nil
+}
+
+func (r *WorkspaceReconciler) handleDeletion(ctx context.Context, workspace *cmpv1alpha1.Workspace) (ctrl.Result, error) {
+	// Nothing to clean up if our finalizer isn't present.
+	if !controllerutil.ContainsFinalizer(workspace, workspaceFinalizer) {
+		return ctrl.Result{}, nil
+	}
+
+	logger := log.FromContext(ctx)
+
+	logger.Info(
+		"Deleting external k3d cluster",
+		"workspace", workspace.Name,
+	)
+
+	// Delete the external cluster.
+	if err := r.Provisioner.DeleteCluster(ctx, workspace.Name); err != nil {
+		logger.Error(err, "Failed to delete external k3d cluster")
+		return ctrl.Result{}, err
+	}
+
+	// Cleanup succeeded, so remove the finalizer.
+	controllerutil.RemoveFinalizer(workspace, workspaceFinalizer)
+
+	// Kubernetes can now delete the Workspace from etcd.
+	if err := r.Update(ctx, workspace); err != nil {
+		return ctrl.Result{}, err
+	}
+	return ctrl.Result{}, nil
+}
+
+// reconcileKubeconfigSecret ensures the secret containing the cluster credentials exists and is up-to-date.
+func (r *WorkspaceReconciler) reconcileKubeconfigSecret(ctx context.Context, workspace *cmpv1alpha1.Workspace, kubeconfigData []byte) error {
+	logger := log.FromContext(ctx)
+
+	secret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      fmt.Sprintf("%s-kubeconfig", workspace.Name),
+			Namespace: workspace.Namespace,
+		},
+	}
+
+	op, err := controllerutil.CreateOrUpdate(ctx, r.Client, secret, func() error {
+		// Set the Workspace as the owner so Kubernetes handles garbage collection.
+		if err := controllerutil.SetControllerReference(workspace, secret, r.Scheme); err != nil {
+			return err
+		}
+
+		if secret.Data == nil {
+			secret.Data = make(map[string][]byte)
+		}
+
+		secret.Data["kubeconfig"] = kubeconfigData
+		secret.Type = corev1.SecretTypeOpaque
+
+		return nil
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to CreateOrUpdate secret: %w", err)
+	}
+
+	if op != controllerutil.OperationResultNone {
+		logger.Info("Reconciled Secret", "operation", op, "name", secret.Name)
+	}
+
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

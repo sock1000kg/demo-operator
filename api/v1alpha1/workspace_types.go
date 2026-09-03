@@ -61,6 +61,9 @@ type WorkspaceStatus struct {
 	// Points to a Secret containing the cluster's kubeconfig
 	KubeConfig string `json:"kubeConfigSecretRef,omitempty"`
 	Ready      bool   `json:"ready"`
+
+	// +kubebuilder:validation:Enum=Pending;Provisioning;Ready;Failed;Deleting
+	Phase string `json:"phase"`
 }
 
 // +kubebuilder:object:root=true

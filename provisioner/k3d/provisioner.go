@@ -22,8 +22,10 @@ func (p *K3dProvisioner) CreateCluster(ctx context.Context, name string, nodeCou
 		"--kubeconfig-update-default=false",
 	)
 
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("failed to create k3d cluster: %w", err)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// This will now print the actual k3d error, e.g., "cluster already exists" or "docker daemon not running"
+		return "", fmt.Errorf("failed to create k3d cluster: %w, output: %s", err, string(output))
 	}
 
 	fmt.Printf("k3d cluster %q created. Getting kubeconfig...\n", name)
